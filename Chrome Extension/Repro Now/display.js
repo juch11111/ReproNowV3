@@ -193,6 +193,7 @@ function init() {
 }
 
 function setupEventHandlers() {
+  // Copy‐to‐clipboard buttons
   $(".js-copy").click(function () {
     var text = $(this).attr("data-copy");
     var el = $(this);
@@ -200,14 +201,12 @@ function setupEventHandlers() {
   });
   $(".js-copy").tooltip();
 
+  // Download button
   document
     .querySelector("#download")
     .addEventListener("click", downloadHandler);
-  document.querySelector("#upload").addEventListener("click", uploadHandler);
 
-  var inputNode = document.querySelector("#vid");
-  inputNode.addEventListener("change", playSelectedFile, false);
-
+  // Drag‐and‐drop zone for direct video upload
   var dropZone = document.getElementById("drop-zone");
   dropZone.addEventListener("click", uploadHandler);
   dropZone.ondrop = function (e) {
@@ -223,6 +222,65 @@ function setupEventHandlers() {
     this.className = "upload-drop-zone";
     return false;
   };
+
+  // --------------------------------------------------------------------------------
+  // NEW ZIP‐UPLOAD HANDLERS (instead of the old two‐step vid+json picker)
+
+  // 1) When user clicks the Upload button, trigger the hidden ZIP file picker:
+  document.querySelector("#upload").addEventListener("click", () => {
+    document.querySelector("#zip").value = "";
+    document.querySelector("#zip").click();
+  });
+
+  // 2) When the user selects a ZIP, unzip it and load both .webm/.mkv + .json:
+  document.querySelector("#zip").addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const videoNode = document.querySelector("video");
+    const timeline = document.querySelector("#Timeline");
+
+    JSZip.loadAsync(file)
+      .then((zip) => {
+        // find the entries
+        let entries = [];
+        zip.forEach((path, entry) => entries.push(entry));
+        const jsonEntry = entries.find((en) => /\.json$/i.test(en.name));
+        const videoEntry = entries.find((en) => /\.(webm|mkv)$/i.test(en.name));
+
+        if (!jsonEntry || !videoEntry) {
+          return alert("ZIP must contain exactly one .webm/.mkv and one .json");
+        }
+
+        // load both in parallel
+        return Promise.all([
+          jsonEntry.async("string"),
+          videoEntry.async("blob"),
+        ]).then(([jsonText, videoBlob]) => {
+          // hide drop‐zone
+          document.getElementById("drop-zone").className =
+            "upload-drop-zone hideit";
+
+          // set video src
+          const url = URL.createObjectURL(videoBlob);
+          videoNode.src = url;
+
+          // clear old timeline
+          timeline.innerHTML = "";
+
+          // parse and render JSON
+          convertStringToObject(jsonText);
+
+          // wire up timeupdate again
+          videoNode.removeEventListener("timeupdate", playJsonFile);
+          videoNode.addEventListener("timeupdate", playJsonFile, false);
+        });
+      })
+      .catch((err) => {
+        console.error("ZIP load error:", err);
+        alert("Failed to read ZIP: " + err.message);
+      });
+  });
 }
 window.onload = init;
 
@@ -1215,11 +1273,47 @@ function parseURL(url) {
   result.fragment = match[5];
   return result;
 }
-function uploadHandlers() {
-  var jsonInput = document.querySelector("#json");
-  jsonInput.addEventListener("change", processJson, false);
-
-  document.querySelector("#formbut").addEventListener("click", function () {
-    document.querySelector("#formelements").style.visibility = "hidden";
-  });
+function uploadHandler() {
+  document.querySelector("#zip").click();
 }
+
+document.querySelector("#zip").addEventListener("change", function () {
+  const file = this.files[0];
+  if (!file) return;
+
+  const videoNode = document.querySelector("video");
+
+  JSZip.loadAsync(file).then(function (zip) {
+    let jsonFound = false;
+    let videoFound = false;
+
+    zip.forEach(function (relativePath, zipEntry) {
+      if (zipEntry.name.endsWith(".webm") || zipEntry.name.endsWith(".mkv")) {
+        zipEntry.async("blob").then(function (blob) {
+          const fileURL = URL.createObjectURL(blob);
+          videoNode.src = fileURL;
+          videoFound = true;
+        });
+      }
+
+      if (zipEntry.name.endsWith(".json")) {
+        zipEntry.async("text").then(function (text) {
+          convertStringToObject(text);
+          jsonFound = true;
+        });
+      }
+    });
+
+    setTimeout(() => {
+      if (!jsonFound) {
+        document.querySelector("#Timeline").innerHTML = "";
+        alert("JSON file not found in zip");
+      }
+      if (!videoFound) {
+        alert("Video file not found in zip");
+      }
+    }, 1000);
+
+    document.getElementById("drop-zone").className = "upload-drop-zone hideit";
+  });
+});
