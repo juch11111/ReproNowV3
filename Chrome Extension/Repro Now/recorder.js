@@ -1,3 +1,4 @@
+// This is Chrome Extension/Repro Now/recorder.js
 let mediaRecorder = null;
 let recordedBlobs = [];
 

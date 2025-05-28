@@ -1,3 +1,4 @@
+// This is Chrome Extension/Repro Now/background.js
 // Copyright 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -91,6 +92,11 @@ function addWebReq(details) {
     if (details.responseHeaders) temp.responseHeaders = details.responseHeaders;
     if (details.statusCode) temp.statusCode = details.statusCode;
     if (details.statusLine) temp.statusLine = details.statusLine;
+    // ALSO grab any responseBody or Base64 flag
+    if (details.responseBody !== undefined) {
+      temp.responseBody = details.responseBody;
+      temp.responseBodyBase64 = details.responseBodyBase64;
+    }
     req.set(details.requestId, temp);
     console.log("New request added. Total requests:", req.size);
   } else {
@@ -111,6 +117,12 @@ function addWebReq(details) {
       );
     }
     if (details.statusLine) existingReq.statusLine = details.statusLine;
+    // AND if the debugger callback passed us a body, hang on to it
+    if (details.responseBody !== undefined) {
+      existingReq.responseBody = details.responseBody;
+      existingReq.responseBodyBase64 = details.responseBodyBase64;
+      console.log("Added responseBody to request:", details.requestId);
+    }
   }
   saveState();
 }
@@ -213,7 +225,11 @@ function networkEventHandler(source, method, params) {
       console.log("Loading finished for request:", params.requestId);
       // Add delay to ensure resource is available (from search results)
       setTimeout(() => {
-        getResponseBodyWithRetry(source.tabId, params.requestId, 3);
+        getResponseBodyWithRetry(
+          source.tabId,
+          params.requestId,
+          /* maxRetries: */ 3
+        );
       }, 500); // Increased delay from 100ms to 500ms
     }
   }
@@ -224,9 +240,7 @@ function getResponseBodyWithRetry(tabId, requestId, maxRetries) {
   chrome.debugger.sendCommand(
     { tabId: tabId },
     "Network.getResponseBody",
-    {
-      requestId: requestId,
-    },
+    { requestId },
     (result) => {
       if (chrome.runtime.lastError) {
         console.warn(
@@ -244,7 +258,7 @@ function getResponseBodyWithRetry(tabId, requestId, maxRetries) {
               "No data found for resource"
             ))
         ) {
-          const delay = (4 - maxRetries) * 500; // 500ms, 1000ms, 1500ms delays
+          const delay = (4 - maxRetries) * 500;
           console.log(
             `Retrying response body for ${requestId} in ${delay}ms, attempts left: ${
               maxRetries - 1
@@ -260,53 +274,14 @@ function getResponseBodyWithRetry(tabId, requestId, maxRetries) {
           "Response body captured successfully for request:",
           requestId
         );
+        // inject the body into the same WebRequest object
         addWebReq({
-          requestId: requestId,
+          requestId,
           responseBody: result.body,
           responseBodyBase64: result.base64Encoded,
         });
       } else {
         console.log("No response body available for request:", requestId);
-      }
-    }
-  );
-}
-
-// Add retry mechanism for getting response body
-function getResponseBodyWithRetry(tabId, requestId, maxRetries) {
-  chrome.debugger.sendCommand(
-    { tabId: tabId },
-    "Network.getResponseBody",
-    {
-      requestId: requestId,
-    },
-    (result) => {
-      if (chrome.runtime.lastError) {
-        console.warn("Response body error:", chrome.runtime.lastError.message);
-
-        // Retry if we have attempts left and it's the -32000 error
-        if (
-          maxRetries > 0 &&
-          chrome.runtime.lastError.message.includes(
-            "No resource with given identifier found"
-          )
-        ) {
-          console.log(
-            `Retrying response body for ${requestId}, attempts left: ${
-              maxRetries - 1
-            }`
-          );
-          setTimeout(() => {
-            getResponseBodyWithRetry(tabId, requestId, maxRetries - 1);
-          }, 200);
-        }
-      } else if (result && result.body) {
-        console.log("Response body captured for request:", requestId);
-        addWebReq({
-          requestId: requestId,
-          responseBody: result.body,
-          responseBodyBase64: result.base64Encoded,
-        });
       }
     }
   );

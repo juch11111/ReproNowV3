@@ -1,3 +1,4 @@
+// This is Chrome Extension/Repro Now/display.js
 "use strict";
 var InputReq;
 var req;
@@ -39,6 +40,19 @@ var playSelectedFile = function (event) {
     });
     document.getElementById('drop-zone').className = 'upload-drop-zone hideit';*/
 };
+
+// -------------------------------------------------------------------
+// small helper to escape HTML so we can safely inject into <pre>
+function escapeHtml(str) {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+// -------------------------------------------------------------------
+
 function uploadfile(files) {
   noJsonFound = false;
   var file = files[0];
@@ -499,8 +513,8 @@ function displayResponse(webrequest) {
     requestInfo.removeChild(requestInfo.lastChild);
   }
 
+  // Status line (e.g. "OK https://…")
   var statusLine = document.createElement("div");
-  statusLine = document.createElement("div");
   var status = document.createElement("div");
   status.className = "makeitBold disinline";
   status.textContent = webrequest.statusLine + " ";
@@ -512,15 +526,17 @@ function displayResponse(webrequest) {
   requestInfo.appendChild(statusLine);
   requestInfo.appendChild(document.createElement("br"));
 
-  var wrapper;
+  // Prepare tabs wrapper
   var added = false;
-  var tablist = createTablistWrapper();
-  var tabcontent = createtabcontentWrapper();
+  var tablist = createTablistWrapper(); // returns <ul class="nav nav-tabs">
+  var tabcontent = createtabcontentWrapper(); // returns <div class="tab-content">
   var randId = Math.random().toString(36).substr(2, 10);
 
+  // Build the “Raw” dump text
   var rawtext = "";
   if (webrequest.url) rawtext = webrequest.statusLine + " " + webrequest.url;
 
+  // 1) HEADERS tab
   if (webrequest.responseHeaders) {
     added = true;
     tablist.appendChild(
@@ -536,52 +552,73 @@ function displayResponse(webrequest) {
     rawtext += getRawHeaders(webrequest.responseHeaders);
   }
 
-  // FIXED: Add response body tab with proper checking
+  // 2) BODY tab (new)
   if (webrequest.responseBody) {
     console.log("Adding response body tab for:", webrequest.url);
-    var name = "WebResBody";
-    added = true;
-    tablist.appendChild(
-      createtabheader("ResponseBody_" + randId, "Body", name)
-    );
-    tabcontent.appendChild(
-      createTabData(
-        "ResponseBody_" + randId,
-        formatResponseBody(
-          webrequest.responseBody,
-          webrequest.responseBodyBase64
-        ),
-        name
-      )
-    );
 
-    // Add body to raw text
+    // Decode Base64 if needed
+    let raw = webrequest.responseBody;
     if (webrequest.responseBodyBase64) {
       try {
-        rawtext += "\n\n" + atob(webrequest.responseBody);
+        raw = atob(raw);
       } catch (e) {
-        rawtext += "\n\n" + webrequest.responseBody;
+        /* leave as-is */
       }
-    } else {
-      rawtext += "\n\n" + webrequest.responseBody;
     }
+
+    // Pretty-print JSON if possible
+    let formatted = raw;
+    try {
+      const obj = JSON.parse(raw);
+      formatted = JSON.stringify(obj, null, 2);
+    } catch (_) {
+      // not JSON — keep raw text
+    }
+
+    // Unique IDs and names
+    const tabId = "ResponseBody_" + randId;
+    const tabName = "WebResBody";
+    added = true;
+
+    // Append the “Body” tab header
+    tablist.appendChild(createtabheader(tabId, "Body", tabName));
+
+    // Create and append the BODY pane
+    const bodyPane = document.createElement("div");
+    bodyPane.className = `tab-pane ${tabName}`;
+    bodyPane.id = tabId;
+    bodyPane.setAttribute("role", "tabpanel");
+    bodyPane.innerHTML = `
+      <div class="response-body-content">
+        <pre>${escapeHtml(formatted)}</pre>
+      </div>
+    `;
+    tabcontent.appendChild(bodyPane);
+
+    // Also add to Raw dump if you use it
+    rawtext += "\n\n" + raw;
   } else {
     console.log("No response body found for:", webrequest.url);
   }
 
+  // If we added any tabs, render them
   if (added) {
     requestInfo.appendChild(tablist);
     requestInfo.appendChild(tabcontent);
-    var webres = document.querySelectorAll(".WebResheader");
 
-    for (var i = 0, len = webres.length; i < len; i++) {
-      if (!webres[i].classList.contains("active"))
+    // Make sure all headers tabs start active (so at least one pane shows)
+    var webres = document.querySelectorAll(".WebResheader");
+    for (var i = 0; i < webres.length; i++) {
+      if (!webres[i].classList.contains("active")) {
         webres[i].classList.add("active");
+      }
     }
   }
 
-  document.querySelector("#ResRawButton").removeAttribute("data-copy");
-  document.querySelector("#ResRawButton").setAttribute("data-copy", rawtext);
+  // Wire up the Raw-button with your accumulated rawtext
+  var rawBtn = document.querySelector("#ResRawButton");
+  rawBtn.removeAttribute("data-copy");
+  rawBtn.setAttribute("data-copy", rawtext);
 }
 
 function createTablistWrapper() {

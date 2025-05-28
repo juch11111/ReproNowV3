@@ -1,3 +1,4 @@
+// This is Chrome Extension/Repro Now/popup.js
 function start() {
   var currTab;
   chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
