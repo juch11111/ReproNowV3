@@ -899,26 +899,33 @@ function convertStringToObject(stringjson) {
   }
 
   try {
+    // 1) parse and reset
     req = new Map();
     InputReq = JSON.parse(stringjson);
-    seq_timeline = new Array();
 
+    // 2) normalize timestamps
+    // collect all numeric requesttimes
+    const allRequestTimes = InputReq.map((i) => i.webReq.requesttime).filter(
+      (t) => typeof t === "number"
+    );
+    const baseTime = allRequestTimes.length ? Math.min(...allRequestTimes) : 0;
+
+    // 3) build timeline entries
+    seq_timeline = [];
     InputReq.forEach(function (i) {
-      //console.log(i);
       req.set(i.requestid, i.webReq);
-      //displayRequest(i.webReq);
-      //displayResponse(i.webReq);
-      if (i.webReq.requesttime) {
-        var temp = new Timeline();
-        temp.time = i.webReq.requesttime;
+
+      if (typeof i.webReq.requesttime === "number") {
+        const temp = new Timeline();
+        temp.time = i.webReq.requesttime - baseTime;
         temp.url = i.webReq.url;
         temp.method = i.webReq.method;
         temp.isRequest = true;
         seq_timeline.push(temp);
       }
-      if (i.webReq.responseTime) {
-        var temp = new Timeline();
-        temp.time = i.webReq.responseTime;
+      if (typeof i.webReq.responseTime === "number") {
+        const temp = new Timeline();
+        temp.time = i.webReq.responseTime - baseTime;
         temp.url = i.webReq.url;
         temp.statusCode = i.webReq.statusCode;
         temp.isRequest = false;
@@ -926,8 +933,8 @@ function convertStringToObject(stringjson) {
       }
     });
 
+    // 4) sort, render, wire up
     seq_timeline = sortTimelineArray(seq_timeline);
-    //console.log(seq_timeline);
     displayTimeline(seq_timeline);
     setOnClickForDivs();
     $(function () {
@@ -939,7 +946,7 @@ function convertStringToObject(stringjson) {
     console.error("Error parsing JSON:", error);
     console.error("Problematic string:", stringjson);
     req = new Map();
-    seq_timeline = new Array();
+    seq_timeline = [];
     displayTimeline([]);
     setOnClickForDivs();
     return [];
