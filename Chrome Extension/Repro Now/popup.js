@@ -1,4 +1,20 @@
 // This is Chrome Extension/Repro Now/popup.js
+
+const SKIP_KEYS = new Set([
+  "req_data",
+  "startTime",
+  "recordedBlobs",
+  "pending_request_id",
+  "tabidRecieved",
+  "videoName",
+  "customName",
+  "tabRecordOnlyNewTab",
+  "recordCurrentTabOnly",
+  "recordAlltabs",
+  "isRecording",
+  "recordingStartTime",
+]);
+
 function start() {
   var currTab;
   chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
@@ -106,28 +122,47 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 function addHistory() {
   var listgroup = document.querySelector("#listgrp");
   listgroup.innerHTML = "";
-  chrome.storage.local.get(null, function (items) {
-    items = mapSort(items);
-    //console.log(items);
-    for (key in items) {
-      //console.log(items[key]);
+  chrome.storage.local.get(null, function (allItems) {
+    // Sort newest-first
+    const items = mapSort(allItems);
 
-      // FIX: Add null checking and skip internal storage keys
-      if (
-        !items[key] ||
-        typeof items[key] !== "object" ||
-        key.includes("req_data") ||
-        key.includes("startTime") ||
-        key.includes("pending_request_id") ||
-        key.includes("tabidRecieved")
-      ) {
-        continue;
-      }
+    Object.entries(items).forEach(([key, value]) => {
+      // 1) skip internal state keys
+      if (SKIP_KEYS.has(key)) return;
 
-      var name = key;
-      if (items[key].friendlyName) name = items[key].friendlyName;
-      listgroup.appendChild(createSingleHistory(key, name));
-    }
+      // 2) skip anything without a timestamp (not a saved recording)
+      if (!value || typeof value !== "object" || !value.timestamp) return;
+
+      // 3) determine display name & date
+      const name = value.friendlyName || key;
+      const date = new Date(value.timestamp);
+      const dateStr = isNaN(date) ? "Unknown Date" : date.toDateString();
+
+      // 4) create the history item
+      const item = document.createElement("div");
+      item.className =
+        "pointer list-group-item list-group-item-action flex-column align-items-start";
+
+      item.innerHTML = `
+        <div class="d-flex w-100 justify-content-between">
+          <div class="videoName">${name}</div>
+          <small class="text-muted">${dateStr}</small>
+        </div>
+        <div class="form-inline buttongp">
+          <div class="form-group actionButton">
+            <button type="button" class="btn btn-outline-success btn-sm fa buttonIcons fa-eye but_eye" lid="${key}"></button>
+          </div>
+          <div class="form-group actionButton">
+            <button type="button" class="btn btn-outline-success btn-sm fa buttonIcons fa-download but_download" lid="${key}"></button>
+          </div>
+          <div class="form-group actionButton">
+            <button type="button" class="btn btn-outline-success btn-sm fa buttonIcons fa-trash but_trash" lid="${key}"></button>
+          </div>
+        </div>`;
+
+      listgroup.appendChild(item);
+    });
+
     addHistoryEventListeners();
   });
 }
@@ -179,13 +214,49 @@ function previewHandler() {
   });
 }
 
-function downloadHandler() {
-  var videoName = this.getAttribute("lid");
-  //TODO
-  /*chrome.windows.create(
-          		{url:'download.html?localStorageId='+videoName, type: "normal", width: 300, height: 200
-    });*/
-  chrome.tabs.create({ url: "download.html?localStorageId=" + videoName });
+async function downloadHandler() {
+  const key = this.getAttribute("lid");
+  chrome.storage.local.get(key, async function (result) {
+    const rec = result[key];
+    if (!rec) return;
+
+    // 1) Create a new JSZip
+    const zip = new JSZip();
+    // 2) Add the WebM
+    const videoDataUrl = rec.video; // data: URI
+    const videoBlob = dataURLtoBlob(videoDataUrl);
+    const videoName = (rec.friendlyName || key) + ".webm";
+    zip.file(videoName, videoBlob);
+
+    // 3) Add the JSON
+    const jsonStr = rec.json; // your JSON string
+    const jsonName = (rec.friendlyName || key) + ".json";
+    zip.file(jsonName, jsonStr);
+
+    // 4) Generate the ZIP
+    const content = await zip.generateAsync({ type: "blob" });
+
+    // 5) Trigger download
+    const url = URL.createObjectURL(content);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = (rec.friendlyName || key) + ".zip";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
+}
+
+// Helpers:
+function dataURLtoBlob(dataurl) {
+  const parts = dataurl.split(",");
+  const mime = parts[0].match(/:(.*?);/)[1];
+  const bstr = atob(parts[1]);
+  let n = bstr.length;
+  const u8arr = new Uint8Array(n);
+  while (n--) u8arr[n] = bstr.charCodeAt(n);
+  return new Blob([u8arr], { type: mime });
 }
 
 function deleteHandler() {
@@ -234,6 +305,8 @@ function createButtons(text, id) {
 }
 
 document.querySelector(".historyBut").addEventListener("click", function () {
+  // refresh the list every time you open history
+  addHistory();
   document.querySelector(".mainPage").style.display = "none";
   document.querySelector(".secondPage").style.display = "block";
 });

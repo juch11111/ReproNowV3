@@ -1,41 +1,43 @@
+// This is file Chrome Extension/Repro Now/ffmpeg-webw.js
 //importScripts('ffmpeg-all-codecs.js');
 
-importScripts('ffmpeg_asm.js');
+importScripts("ffmpeg_asm.js");
 var now = Date.now;
 
 function print(text) {
   postMessage({
-    'type' : 'stdout',
-    'data' : text
+    type: "stdout",
+    data: text,
   });
 }
 
-onmessage = function(event) {
-
+onmessage = function (event) {
   var message = event.data;
 
   if (message.type === "command") {
-
     var Module = {
       print: print,
       printErr: print,
       files: message.Allfiles || [],
       arguments: message.arguments || [],
-      TOTAL_MEMORY: message.mem || 268435456
+      TOTAL_MEMORY: message.mem || 268435456,
       // Can play around with this option - must be a power of 2
       // TOTAL_MEMORY: 268435456
     };
 
     postMessage({
-      'type' : 'start',
-      'data' : Module.arguments.join(" ")
+      type: "start",
+      data: Module.arguments.join(" "),
     });
 
     postMessage({
-      'type' : 'stdout',
-      'data' : 'Received command: ' +
-                Module.arguments.join(" ") +
-                ((Module.TOTAL_MEMORY) ? ".  Processing with " + Module.TOTAL_MEMORY + " bits." : "")
+      type: "stdout",
+      data:
+        "Received command: " +
+        Module.arguments.join(" ") +
+        (Module.TOTAL_MEMORY
+          ? ".  Processing with " + Module.TOTAL_MEMORY + " bits."
+          : ""),
     });
 
     var time = now();
@@ -44,18 +46,18 @@ onmessage = function(event) {
 
     var totalTime = now() - time;
     postMessage({
-      'type' : 'stdout',
-      'data' : 'Finished processing (took ' + totalTime + 'ms)'
+      type: "stdout",
+      data: "Finished processing (took " + totalTime + "ms)",
     });
     console.log(result);
     postMessage({
-      'type' : 'done',
-      'data' : result,
-      'time' : totalTime
+      type: "done",
+      data: result,
+      time: totalTime,
     });
   }
 };
 
 postMessage({
-  'type' : 'ready'
+  type: "ready",
 });
